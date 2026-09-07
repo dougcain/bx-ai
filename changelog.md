@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ⚠️ Migration
+
+- **Minimum BoxLang runtime is now 1.14.0** (`box.json` `minimumVersion`, previously 1.8.0). BoxLang ≤1.13 resolves unqualified identifiers inside a `catch` body against the class `variables` scope before locals and `arguments`; 1.14.0 fixed this. The module still qualifies its own catch reads, but middleware, tools, and interceptors authored against this module should not rely on older runtimes. The build now compiles and tests against 1.17.0.
+
 ## [3.4.0] - 2026-09-01
 
 ### 🥊 Added
