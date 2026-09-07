@@ -1269,7 +1269,7 @@ public class FlightRecorderMiddlewareTest extends BaseIntegrationTest {
 		            handler : function() { liveCalls++; return "LIVE"; }
 		        );
 		        turn2 = play.wrapLLMCall(
-		            context : { stream: true, transport: "cohere-sse", dataPacket: { model: "command-r", messages: [ {}, {}, {} ] } },
+		            context : { stream: true, transport: "cohere-sse", dataPacket: { model: "command-r", messages: [ {role:"user",content:"hi"}, {role:"assistant",content:"calling tool"}, {role:"tool",content:"tool output"} ] } },
 		            handler : function() { liveCalls++; return "LIVE"; }
 		        );
 
@@ -1292,4 +1292,60 @@ public class FlightRecorderMiddlewareTest extends BaseIntegrationTest {
 	// anywhere else in this suite, so per the task instructions this case is skipped rather than
 	// guessed at. _saveSnapshot() has been made `public` (see FlightRecorderMiddleware.bx) so a
 	// real .bx subclass file can override it; that mechanism is exercised manually instead.
+	@Test
+	@DisplayName( "Strict stream replay distinguishes operation, URL model and legacy packet dialect" )
+	public void testStreamIdentityMatching( @TempDir Path tempDir ) {
+		variables.put( Key.of( "fixturePath" ), tempDir.resolve( "identity.json" ).toString() );
+		// @formatter:off
+		runtime.executeSource(
+			"""
+				import bxModules.bxai.models.middleware.core.FlightRecorderMiddleware;
+				packet = { messages: [{role: "user", content: [{text: "hello"}]}], inferenceConfig: {maxTokens: 50} };
+				original = {stream: true, transport: "bedrock-event-stream", modelId: "model-a", operation: "converse-stream", dataPacket: packet};
+				recorder = new FlightRecorderMiddleware(mode: "record", fixturePath: fixturePath);
+				recorder.wrapLLMCall(original, () => charsetDecode("stream bytes", "UTF-8"));
+				tape = recorder.getTape();
+				changes = [{operation:"invoke-with-response-stream"}, {modelId:"model-b"}, {dataPacket:{messages:[{role:"user",content:"hello"}],anthropic_version:"bedrock-2023-05-31",max_tokens:50}}];
+				liveCalls = 0;
+				""", context );
+		// @formatter:on
+		for ( int index = 1; index <= 3; index++ ) {
+			variables.put( Key.of( "changeIndex" ), index );
+			// @formatter:off
+			runtime.executeSource(
+				"""
+					import bxModules.bxai.models.middleware.core.FlightRecorderMiddleware;
+					candidate = duplicate(original);
+					candidate.append(changes[changeIndex], true);
+					replay = new FlightRecorderMiddleware(mode:"replay",fixturePath:fixturePath,strict:true);
+					rejected = false;
+					try {
+						replay.wrapLLMCall(candidate, () => {liveCalls++; return "LIVE";});
+					} catch (any e) { rejected = e.type == "FlightRecorder.StreamReplayUnsupported"; }
+					""", context );
+			// @formatter:on
+			assertThat( variables.getAsBoolean( Key.of( "rejected" ) ) ).isTrue();
+		}
+		// @formatter:off
+		runtime.executeSource(
+			"""
+				import bxModules.bxai.models.middleware.core.FlightRecorderMiddleware;
+				replay = new FlightRecorderMiddleware(mode:"replay",fixturePath:fixturePath,strict:true);
+				matched = charsetEncode(replay.wrapLLMCall(original, () => {liveCalls++; return "LIVE";}), "UTF-8");
+				// Legacy recordings still reject incompatible request dialects.
+				tape.interactions[1].delete("modelId");
+				tape.interactions[1].delete("operation");
+				fileWrite(fixturePath,jsonSerialize(tape));
+				replay = new FlightRecorderMiddleware(mode:"replay",fixturePath:fixturePath,strict:true);
+				rejected = false;
+				try {
+					replay.wrapLLMCall(candidate, () => {liveCalls++; return "LIVE";});
+				} catch (any e) { rejected = e.type == "FlightRecorder.StreamReplayUnsupported"; }
+				""", context );
+		// @formatter:on
+		assertThat( variables.getAsBoolean( Key.of( "rejected" ) ) ).isTrue();
+		assertThat( variables.getAsInteger( Key.of( "liveCalls" ) ) ).isEqualTo( 0 );
+		assertThat( variables.getAsString( Key.of( "matched" ) ) ).isEqualTo( "stream bytes" );
+	}
+
 }

@@ -329,6 +329,8 @@ class extends="BaseAiMiddleware" {
 					"stream"  : true,
 					"encoding": "base64",
 					"transport": context.transport ?: "",
+					"modelId" : context.modelId ?: "",
+					"operation": context.operation ?: "",
 					"request" : duplicate( context.dataPacket ?: {} ),
 					"response": toBase64( response )
 				} )
@@ -340,6 +342,8 @@ class extends="BaseAiMiddleware" {
 					"type"    : "llm",
 					"stream"  : true,
 					"transport": context.transport ?: "",
+					"modelId" : context.modelId ?: "",
+					"operation": context.operation ?: "",
 					"request" : duplicate( context.dataPacket ?: {} ),
 					"response": response
 				} )
@@ -424,9 +428,8 @@ class extends="BaseAiMiddleware" {
 	/**
 	 * Whether a recorded `stream: true` interaction belongs to the call being replayed.
 	 *
-	 * A tape recorded before the transport marker existed carries neither key and still matches
-	 * anything (backwards compatible); once a transport was recorded it must be the same one, and
-	 * a recorded request must fingerprint-match the request now being made.
+	 * Identity fields are checked when recorded; older fixtures fall back to packet matching.
+	 * A recorded request must fingerprint-match the request now being made.
 	 *
 	 * @candidate The recorded interaction
 	 * @context   The streaming LLM call context
@@ -439,6 +442,15 @@ class extends="BaseAiMiddleware" {
 			return false
 		}
 
+		// The model is in Bedrock's URL, not its packet; both APIs share the transport name.
+		// New recordings therefore carry the identity supplied by the transport explicitly.
+		for ( var identityKey in [ "modelId", "operation" ] ) {
+			var recordedIdentity = arguments.candidate[ identityKey ] ?: "";
+			if ( len( recordedIdentity ) && compare( recordedIdentity, arguments.context[ identityKey ] ?: "" ) != 0 ) {
+				return false;
+			}
+		}
+
 		var recordedRequest = arguments.candidate.request ?: {}
 		var liveRequest     = arguments.context.dataPacket ?: {}
 		if ( !isStruct( recordedRequest ) || recordedRequest.isEmpty() || !isStruct( liveRequest ) || liveRequest.isEmpty() ) {
@@ -449,18 +461,16 @@ class extends="BaseAiMiddleware" {
 	}
 
 	/**
-	 * Cheap, stable fingerprint of a request data packet: the model plus the number of messages.
-	 * Deliberately coarse — enough to tell two providers (or two turns) apart without making a
-	 * fixture brittle against incidental payload differences.
+	 * Fingerprint the complete packet. A model/message-count pair cannot distinguish vendor
+	 * dialects when the model lives in the URL, or different prompts of the same length.
+	 * This also protects older recordings that lack explicit model/operation fields.
 	 *
 	 * @request The provider data packet
 	 *
 	 * @return Fingerprint string
 	 */
 	private string function _requestFingerprint( required struct request ) {
-		var modelId  = arguments.request.model ?: ( arguments.request.modelId ?: "" )
-		var messages = arguments.request.messages ?: []
-		return lCase( isSimpleValue( modelId ) ? modelId : "" ) & "|" & ( isArray( messages ) ? messages.len() : 0 )
+		return hash( jsonSerialize( arguments.request ), "SHA-256" )
 	}
 
 	// ==================== Public Utility Methods ====================
