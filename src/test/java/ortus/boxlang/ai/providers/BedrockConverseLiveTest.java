@@ -242,6 +242,137 @@ public class BedrockConverseLiveTest extends BedrockLiveTestBase {
 		assertThat( variables.getAsInteger( Key.of( "count" ) ) ).isGreaterThan( 3 );
 	}
 
+	// ---------------------------------------------------------------- tool_choice on Converse
+
+	@DisplayName( "Converse: object tool_choice forces the named tool, and none sends no toolConfig (Claude)" )
+	@Test
+	public void testConverseObjectToolChoiceForcesNamedTool() {
+		// Two plausible tools, one forced by the OpenAI-shaped object form
+		// { type: "function", function: { name } } that converseToolChoice() maps onto Converse's
+		// toolChoice.tool. A forced tool choice is re-sent on every interaction, so the tool loop
+		// can only end by hitting maxInteractions — hence the try/catch and the low cap.
+		// @formatter:off
+		assumeLive( """
+			weatherCalls         = 0
+			timeCalls            = 0
+			forcedHasToolConfig  = false
+			forcedToolChoiceJson = ""
+			forcedError          = ""
+
+			weatherTool = aiTool( "get_weather", "Get the current temperature for a city.", city => {
+				weatherCalls++
+				return "18C"
+			} ).describeCity( "City name e.g. Paris, France" )
+
+			timeTool = aiTool( "get_time", "Get the current local time for a city.", city => {
+				timeCalls++
+				return "14:05"
+			} ).describeCity( "City name e.g. Paris, France" )
+
+			forcedRecorder = { "wrapLLMCall": ( ctx, handler ) => {
+				if ( forcedToolChoiceJson == "" ) {
+					forcedHasToolConfig  = structKeyExists( ctx.dataPacket, "toolConfig" )
+					forcedToolChoiceJson = forcedHasToolConfig ? jsonSerialize( ctx.dataPacket.toolConfig.toolChoice ?: {} ) : ""
+				}
+				return handler()
+			} }
+
+			try {
+				aiChat(
+					"I am planning a call with someone in Paris. What should I know?",
+					{
+						model      : "%s",
+						max_tokens : 200,
+						tools      : [ weatherTool, timeTool ],
+						tool_choice: { type: "function", function: { name: "get_time" } }
+					},
+					{ maxInteractions: 2, middleware: [ forcedRecorder ] }
+				)
+			} catch( any e ) {
+				forcedError = e.type & " | " & e.message
+			}
+			forcedTimeCalls    = timeCalls
+			forcedWeatherCalls = weatherCalls
+			println( "forced toolChoice=#forcedToolChoiceJson# time=#forcedTimeCalls# weather=#forcedWeatherCalls# error=#forcedError#" )
+
+			// ---- same request with tool_choice "none": no toolConfig at all, so no tool can run
+			weatherCalls      = 0
+			timeCalls         = 0
+			noneHasToolConfig = true
+			noneRecorder = { "wrapLLMCall": ( ctx, handler ) => {
+				noneHasToolConfig = structKeyExists( ctx.dataPacket, "toolConfig" )
+				return handler()
+			} }
+			noneResult = aiChat(
+				"I am planning a call with someone in Paris. What should I know?",
+				{
+					model      : "%s",
+					max_tokens : 200,
+					tools      : [ weatherTool, timeTool ],
+					tool_choice: "none"
+				},
+				{ maxInteractions: 2, middleware: [ noneRecorder ] }
+			)
+			noneTimeCalls    = timeCalls
+			noneWeatherCalls = weatherCalls
+			println( "none hasToolConfig=#noneHasToolConfig# time=#noneTimeCalls# weather=#noneWeatherCalls#" )
+			""".formatted( BEDROCK_MODEL, BEDROCK_MODEL ) );
+		// @formatter:on
+
+		// The forced tool ran and the body carried toolChoice.tool. Note what Converse actually
+		// does with toolChoice.tool (observed live, Claude haiku 4.5, 2026-09): it makes the named
+		// tool REQUIRED, not EXCLUSIVE — Claude returned a get_time tool_use block on every turn
+		// and also emitted a get_weather block alongside it. So the assertion is "the forced tool
+		// ran at least as often as its sibling", not "the sibling never ran".
+		assertThat( variables.getAsInteger( Key.of( "forcedTimeCalls" ) ) ).isAtLeast( 1 );
+		assertThat( variables.getAsInteger( Key.of( "forcedTimeCalls" ) ) )
+		    .isAtLeast( variables.getAsInteger( Key.of( "forcedWeatherCalls" ) ) );
+		assertThat( variables.getAsBoolean( Key.of( "forcedHasToolConfig" ) ) ).isTrue();
+		assertThat( str( "forcedToolChoiceJson" ) ).contains( "tool" );
+		assertThat( str( "forcedToolChoiceJson" ) ).contains( "get_time" );
+
+		// tool_choice "none" omits toolConfig entirely, so neither tool can be called.
+		assertThat( variables.getAsBoolean( Key.of( "noneHasToolConfig" ) ) ).isFalse();
+		assertThat( variables.getAsInteger( Key.of( "noneTimeCalls" ) ) ).isEqualTo( 0 );
+		assertThat( variables.getAsInteger( Key.of( "noneWeatherCalls" ) ) ).isEqualTo( 0 );
+	}
+
+	// ---------------------------------------------------------------- stream call context
+
+	@DisplayName( "ConverseStream: beforeLLMCall context identifies the stream operation (Claude)" )
+	@Test
+	public void testConverseStreamBeforeLLMCallContext() {
+		// @formatter:off
+		assumeLive( """
+			import bxModules.bxai.models.middleware.AiMiddlewareResult;
+
+			seenStream    = false
+			seenTransport = ""
+			seenModelId   = ""
+			seenOperation = ""
+			recorder = { "beforeLLMCall": ( ctx ) => {
+				seenStream    = ctx.stream    ?: false
+				seenTransport = ctx.transport ?: ""
+				seenModelId   = ctx.modelId   ?: ""
+				seenOperation = ctx.operation ?: ""
+				return AiMiddlewareResult::continue()
+			} }
+
+			aiChatStream(
+				"Reply with exactly the one word: pong",
+				( chunk ) => {},
+				{ model: "%s", max_tokens: 50 },
+				{ middleware: [ recorder ] }
+			)
+			println( "stream ctx stream=#seenStream# transport=#seenTransport# modelId=#seenModelId# operation=#seenOperation#" )
+			""".formatted( BEDROCK_MODEL ) );
+		// @formatter:on
+		assertThat( variables.getAsBoolean( Key.of( "seenStream" ) ) ).isTrue();
+		assertThat( str( "seenTransport" ) ).isEqualTo( "bedrock-event-stream" );
+		assertThat( str( "seenModelId" ).toLowerCase() ).contains( "claude" );
+		assertThat( str( "seenOperation" ) ).isEqualTo( "converse-stream" );
+	}
+
 	// ---------------------------------------------------------------- InvokeModel opt-out
 
 	@DisplayName( "InvokeModel opt-out: bedrockApi=invoke still chats and streams (Claude)" )
