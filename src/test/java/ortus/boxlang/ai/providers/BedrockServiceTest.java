@@ -8521,6 +8521,40 @@ public class BedrockServiceTest extends BaseIntegrationTest {
 	}
 
 	@Test
+	@DisplayName( "Converse object tool choices reach both chat transports unchanged" )
+	public void testConverseObjectToolChoiceThroughChat() {
+		// @formatter:off
+		runtime.executeSource(
+			"""
+				provider = %s
+				choicesSeen = []
+				identities = []
+				for ( streaming in [ false, true ] ) {
+					for ( choice in [ { type: "function", function: { name: "probe" } }, { type: "tool", name: "probe" } ] ) {
+						tool = aiTool( "probe", "Probe", () => "ok" )
+						chatRequest = aiChatRequest( aiMessage().user( "hi" ),
+							{ model: "anthropic.claude-3-sonnet-20240229-v1:0", tools: [tool], tool_choice: choice },
+							{ provider: "bedrock" } )
+						chatRequest.addMiddleware( { wrapLLMCall: ( ctx, handler ) => {
+							choicesSeen.append( ctx.dataPacket.toolConfig.toolChoice.tool.name )
+							if ( streaming ) {
+								identities.append( ctx.modelId & "|" & ctx.operation )
+								return jsonSerialize( { eventType: "messageStop", bytes: toBase64( charsetDecode( '{"stopReason":"end_turn"}', "UTF-8" ) ) } )
+							}
+							return { output: { message: { role: "assistant", content: [{text: "done"}] } }, stopReason: "end_turn" }
+						} } )
+						if ( streaming ) provider.chatStream( chatRequest, (chunk) => {} ); else provider.chat( chatRequest );
+					}
+				}
+				actualChoices = choicesSeen.toList( "|" )
+				actualIdentity = identities.first()
+			""".formatted( converseService() ), context );
+		// @formatter:on
+		assertThat( variables.getAsString( Key.of( "actualChoices" ) ) ).isEqualTo( "probe|probe|probe|probe" );
+		assertThat( variables.getAsString( Key.of( "actualIdentity" ) ) ).isEqualTo( "anthropic.claude-3-sonnet-20240229-v1:0|converse-stream" );
+	}
+
+	@Test
 	@DisplayName( "RF9: tool_choice 'none' omits toolConfig entirely on the Converse body" )
 	public void testConverseToolChoiceNoneOmitsToolConfig() {
 		// @formatter:off

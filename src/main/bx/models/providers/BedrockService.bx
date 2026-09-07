@@ -1983,7 +1983,9 @@ class extends = "BaseService" implements="IAiChatService, IAiEmbeddingsService" 
 		// member, so converseToolChoice() maps it to {} — which sent the tools with NO toolChoice,
 		// i.e. Converse's default of `auto`. The only way to express "none" on this API is to omit
 		// toolConfig altogether. Structured output forces a tool and therefore overrides it.
-		var suppressTools = !wantsStructured && lcase( trim( arguments.params.tool_choice ?: "" ) ) == "none";
+		var requestedToolChoice = arguments.params.tool_choice ?: "";
+		var suppressTools = !wantsStructured && isSimpleValue( requestedToolChoice )
+			&& lcase( trim( requestedToolChoice ) ) == "none";
 		if ( suppressTools ) {
 			writeLog(
 				text: "Bedrock Converse: tool_choice 'none' — omitting toolConfig entirely (Converse has no ToolChoice 'none' member, so sending the tools would let the model call them)",
@@ -5912,6 +5914,8 @@ class extends = "BaseService" implements="IAiChatService, IAiEmbeddingsService" 
 			dataPacket   : arguments.dataPacket,
 			stream       : true,
 			transport    : "bedrock-event-stream",
+			modelId      : arguments.modelId,
+			operation    : arguments.operation,
 			fallbackRetry: arguments.isFallbackRetry
 		};
 		var streamLlmBefore = arguments.aiRequest.fireMiddleware( "beforeLLMCall", streamContext );
