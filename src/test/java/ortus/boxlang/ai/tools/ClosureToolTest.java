@@ -621,4 +621,5 @@ public class ClosureToolTest extends BaseIntegrationTest {
 
 		assertThat( variables.getAsBoolean( Key.of( "gotRequest" ) ) ).isTrue();
 	}
+
 }

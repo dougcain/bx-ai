@@ -2909,4 +2909,5 @@ public class SuspendResumeIntegrationTest extends BaseIntegrationTest {
 
 		assertThat( variables.get( Key.of( "seenCity" ) ).toString() ).isEqualTo( "LEDGER-CITY" );
 	}
+
 }
