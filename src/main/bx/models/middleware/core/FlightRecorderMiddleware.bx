@@ -119,10 +119,12 @@ class extends="BaseAiMiddleware" {
 
 	// ==================== Internal State ====================
 
-	/**
-	 * Modes accepted by `mode`. Anything else throws `FlightRecorder.InvalidMode` on init.
-	 */
-	variables._validModes = [ "passthrough", "record", "observe", "replay" ];
+	static {
+		/**
+		 * Modes accepted by `mode`. Anything else throws `FlightRecorder.InvalidMode` on init.
+		 */
+		VALID_MODES = [ "passthrough", "record", "observe", "replay" ];
+	}
 
 	/**
 	 * In-memory tape written during recording.
@@ -170,10 +172,10 @@ class extends="BaseAiMiddleware" {
 		boolean strict          = true,
 		any     storageCallback = ""
 	) {
-		if ( !variables._validModes.contains( arguments.mode ) ) {
+		if ( !static.VALID_MODES.contains( arguments.mode ) ) {
 			throw(
 				type   : "FlightRecorder.InvalidMode",
-				message: "Invalid FlightRecorder mode '#arguments.mode#'. Valid modes: #variables._validModes.toList( ", " )#"
+				message: "Invalid FlightRecorder mode '#arguments.mode#'. Valid modes: #static.VALID_MODES.toList( ", " )#"
 			)
 		}
 
