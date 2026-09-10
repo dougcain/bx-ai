@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ⚠️ Migration
+
+- **Minimum BoxLang runtime is now 1.14.0** (`box.json` `minimumVersion`, previously 1.8.0). BoxLang ≤1.13 resolves unqualified identifiers inside a `catch` body against the class `variables` scope before locals and `arguments`; 1.14.0 fixed this. The module still qualifies its own catch reads, but middleware, tools, and interceptors authored against this module should not rely on older runtimes. The build now compiles and tests against 1.17.0.
+
 ### 🥊 Added
 
 - **Transport-agnostic gateway processing API**: `GatewayRequestProcessor` now exposes `processInbound()`, `processHandshake()`, `readInteraction()`, and `submitDecision()` as statics that touch no transport at all — they take the pieces of a request (gateway name, raw body, headers, query params) and return a normalized `{ statusCode, body, contentType, headers }` result. A host framework that already has a router (ColdBox's `route( "/gateways" ).toAiGateway()` terminator) mounts the gateway surface wherever it likes instead of being tied to `cgi.PATH_INFO` and `public/gateway.bxm`. `processHttp()` is now a thin layer over the same statics, so the existing `/~bxai/gateway.bxm` surface is unchanged.
